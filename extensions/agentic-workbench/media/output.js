@@ -55,7 +55,7 @@ function render(data) {
 		blocks.push(block(wording.request, '', data.task));
 	}
 	for (const stage of data.stages) {
-		const detail = [stage.agent, stage.model, stage.attempt ? interpolate(wording.attempt, stage.attempt) : '']
+		const detail = [stage.agent, stage.model, stage.outputType, stage.attempt ? interpolate(wording.attempt, stage.attempt) : '']
 			.filter(Boolean).join(' · ');
 		if (stage.error) {
 			blocks.push(block(stage.name, detail, stage.error, 'error'));
