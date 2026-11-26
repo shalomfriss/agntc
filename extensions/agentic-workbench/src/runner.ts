@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { Agent, FactoryRole, FactorySettings, getAgent, isInputStep, orderedSteps, validateSubagents, Workflow } from './model';
+import { checkArtifact, contractInstruction } from './contracts';
+import { Agent, FactoryRole, FactorySettings, getAgent, isInputStep, orderedSteps, stepKind, validateSubagents, Workflow, WorkflowStep } from './model';
 
 export interface Message {
 	role: 'user' | 'assistant';
@@ -24,6 +25,10 @@ export interface RunStage {
 	model?: string;
 	output?: string;
 	error?: string;
+	/** Artifact type this stage produced (see contracts.ts). */
+	outputType?: string;
+	/** Step kind for deterministic (non-agent) stages such as conditions. */
+	kind?: string;
 }
 
 export type RecordStage = (stage: RunStage) => void;
@@ -39,6 +44,8 @@ interface AgentRun {
 	checkOutput?: (output: string) => void;
 	/** Transient agent to run directly instead of resolving agentId from the workbench (used for dynamic subagents). */
 	agent?: Agent;
+	/** Artifact type the step must produce; recorded on the stage for provenance. */
+	outputType?: string;
 }
 
 export function checkCancelled(signal: AbortSignal): void {
@@ -85,6 +92,12 @@ export class AgentRunner {
 		await this.prepareAgents(ids.map(id => getAgent(this.agents, id)));
 	}
 
+	/** Records a deterministic (non-agent) stage such as a condition or tool step. */
+	recordStep(stage: RunStage): void {
+		this.started(stage.name);
+		this.record(stage);
+	}
+
 	private async prepareAgents(agents: Agent[]): Promise<void> {
 		for (const agent of agents) {
 			checkCancelled(this.signal);
@@ -99,7 +112,7 @@ export class AgentRunner {
 		checkCancelled(this.signal);
 		const agent = options.agent ?? getAgent(this.agents, options.agentId);
 		const access = options.allowWrite && agent.access === 'write';
-		const stage: RunStage = { name: options.name, agent: agent.name, attempt: options.attempt };
+		const stage: RunStage = { name: options.name, agent: agent.name, attempt: options.attempt, outputType: options.outputType };
 		this.started(stage.name);
 		try {
 			await this.prepareAgents([agent]);
@@ -208,32 +221,72 @@ export class AgentRunner {
 	}
 }
 
+/** Reads a pass/fail signal from an upstream artifact (TestReport.passed or ReviewReport.verdict). */
+function passSignal(output: string): { ok: boolean; reason: string } {
+	try {
+		const value = JSON.parse(output) as { passed?: unknown; verdict?: unknown; reason?: unknown; failures?: unknown };
+		if (typeof value.passed === 'boolean') {
+			return { ok: value.passed, reason: value.passed ? 'checks passed' : `checks failed (${(value.failures as unknown[])?.length ?? 0})` };
+		}
+		if (typeof value.verdict === 'string') {
+			return { ok: value.verdict === 'approve', reason: value.verdict === 'approve' ? 'review approved' : `review: ${String(value.reason ?? 'revise')}` };
+		}
+	} catch {
+		// Not a structured artifact.
+	}
+	return { ok: false, reason: 'no pass/fail signal' };
+}
+
 export async function runWorkflow(
 	workflow: Workflow, task: string, runner: AgentRunner, inputValues: Record<string, string> = {},
 ): Promise<string> {
-	const agentSteps = workflow.steps.filter(step => !isInputStep(step));
-	if (!agentSteps.length) {
-		throw new Error('Add at least one agent step before running this workflow.');
+	const agentSteps = workflow.steps.filter(step => stepKind(step) === 'agent');
+	if (!workflow.steps.some(step => stepKind(step) === 'agent' || stepKind(step) === 'condition')) {
+		throw new Error('Add at least one agent or condition step before running this workflow.');
 	}
 	const ordered = orderedSteps(workflow);
 	await runner.prepare(agentSteps.map(step => step.agentId!));
 	const steps = new Map(workflow.steps.map(step => [step.id, step]));
 	const outputs = new Map<string, string>();
+	const label = (step: WorkflowStep) => `## Input from ${step.name}${step.outputType && step.outputType !== 'Text' ? ` (${step.outputType})` : ''}`;
 	for (const step of ordered) {
-		if (isInputStep(step)) {
+		const kind = stepKind(step);
+		if (kind === 'input') {
 			outputs.set(step.id, inputValues[step.id] ?? task);
 			continue;
 		}
+		if (kind === 'condition') {
+			const reasons = step.inputs.map(id => {
+				const signal = passSignal(outputs.get(id) ?? '');
+				return `${steps.get(id)!.name}: ${signal.reason}`;
+			});
+			const passed = step.inputs.every(id => passSignal(outputs.get(id) ?? '').ok);
+			const result = JSON.stringify({ passed, reasons });
+			outputs.set(step.id, result);
+			runner.recordStep({ name: step.name, agent: 'Quality gate', kind: 'condition', outputType: 'GateResult', output: result });
+			continue;
+		}
+		if (kind !== 'agent') {
+			throw new Error(`Step "${step.name}" uses the ${kind} step type, which is not executable yet.`);
+		}
 		const consumesInput = step.inputs.some(id => isInputStep(steps.get(id)!));
 		const parts = consumesInput ? [] : [`## Original request\n\n${task}`];
-		parts.push(...step.inputs.map(id => `## Input from ${steps.get(id)!.name}\n\n${outputs.get(id)!}`));
+		parts.push(...step.inputs.map(id => `${label(steps.get(id)!)}\n\n${outputs.get(id)!}`));
+		const contract = contractInstruction(step.outputType);
 		const output = await runner.run({
 			name: step.name, agentId: step.agentId!, allowWrite: true, input: parts.join('\n\n'),
+			outputType: step.outputType, instructions: contract,
+			checkOutput: contract ? out => {
+				const check = checkArtifact(step.outputType, out);
+				if (!check.valid) {
+					throw new Error(`Output does not satisfy the ${step.outputType} contract: ${check.errors.join(' ')}`);
+				}
+			} : undefined,
 		});
 		outputs.set(step.id, output);
 	}
 	const upstream = new Set(ordered.flatMap(step => step.inputs));
-	const leaves = ordered.filter(step => !isInputStep(step) && !upstream.has(step.id));
+	const leaves = ordered.filter(step => stepKind(step) !== 'input' && !upstream.has(step.id));
 	return leaves.map(step => `## ${step.name}\n\n${outputs.get(step.id)!}`).join('\n\n');
 }
 

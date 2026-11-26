@@ -166,6 +166,53 @@ test('an agent dynamically spawns ad-hoc worker subagents up to its max', async 
 	assert.deepEqual(stages.map(stage => stage.model), ['provider-lead', 'provider-lead', 'provider-lead']);
 });
 
+test('a typed workflow validates artifacts against contracts and evaluates a quality gate', async () => {
+	const workflow = {
+		id: 'feature', name: 'Feature',
+		steps: [
+			{ id: 'spec', name: 'Plan', kind: 'agent', agentId: 'planner', outputType: 'FeatureSpec', inputs: [] },
+			{ id: 'test', name: 'Run tests', kind: 'agent', agentId: 'tester', outputType: 'TestReport', inputs: ['spec'] },
+			{ id: 'review', name: 'Review', kind: 'agent', agentId: 'reviewer', outputType: 'ReviewReport', inputs: ['spec'] },
+			{ id: 'gate', name: 'Quality gate', kind: 'condition', inputs: ['test', 'review'] },
+		],
+	};
+	const { runner, stages } = mocks(['planner', 'tester', 'reviewer'].map(id => agent(id)), undefined, {
+		planner: [
+			system => { assert.match(system, /acceptanceCriteria/); return output(JSON.stringify({ goal: 'Offline' })); },
+			(_, history) => {
+				assert.match(history.at(-1).content, /FeatureSpec contract[\s\S]*acceptanceCriteria is required/);
+				return output(JSON.stringify({ goal: 'Offline', acceptanceCriteria: ['Persist locally'] }));
+			},
+		],
+		tester: [() => output(JSON.stringify({ passed: true, total: 2 }))],
+		reviewer: [(_, history) => {
+			assert.match(history[0].content, /Input from Plan \(FeatureSpec\)/);
+			return output(JSON.stringify({ verdict: 'approve', reason: 'matches spec' }));
+		}],
+	});
+	const result = await runWorkflow(workflow, 'Add offline support', runner);
+	assert.match(result, /## Quality gate/);
+	assert.match(result, /"passed":true/);
+	const gate = stages.find(stage => stage.kind === 'condition');
+	assert.equal(gate.outputType, 'GateResult');
+});
+
+test('a quality gate fails when an upstream review requests revision', async () => {
+	const workflow = {
+		id: 'gated', name: 'Gated',
+		steps: [
+			{ id: 'review', name: 'Review', kind: 'agent', agentId: 'reviewer', outputType: 'ReviewReport', inputs: [] },
+			{ id: 'gate', name: 'Gate', kind: 'condition', inputs: ['review'] },
+		],
+	};
+	const { runner } = mocks([agent('reviewer')], undefined, {
+		reviewer: [() => output(JSON.stringify({ verdict: 'revise', reason: 'missing tests' }))],
+	});
+	const result = await runWorkflow(workflow, 'Check', runner);
+	assert.match(result, /"passed":false/);
+	assert.match(result, /review: missing tests/);
+});
+
 test('Code Factory revises the plan with judge feedback, edits files, and creates a human plan after approval', async t => {
 	const cwd = await folder(t);
 	const workspace = new Workspace(cwd);
