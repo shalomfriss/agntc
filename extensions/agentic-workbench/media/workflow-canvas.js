@@ -120,10 +120,42 @@ function startRename(step) {
 	post({ type: 'renameNode', id: step.id });
 }
 
+function typeName(id) {
+	const type = (snapshot.artifactTypes || []).find(value => value.id === id);
+	return type ? type.name : id;
+}
+
+function typeBadge(id) {
+	const badge = document.createElement('span');
+	badge.className = 'badge type';
+	badge.textContent = typeName(id);
+	return badge;
+}
+
+function producesSelect(step) {
+	const field = document.createElement('div');
+	field.className = 'produces';
+	const label = document.createElement('span');
+	label.className = 'produces-label';
+	label.textContent = wording.outputType;
+	const select = document.createElement('select');
+	select.className = 'type-select';
+	for (const type of (snapshot.artifactTypes || [])) {
+		select.append(new Option(type.name, type.id));
+	}
+	select.value = step.outputType || 'Text';
+	select.disabled = readOnly;
+	select.addEventListener('pointerdown', event => event.stopPropagation());
+	select.addEventListener('change', () => post({ type: 'setOutputType', id: step.id, outputType: select.value }));
+	field.append(label, select);
+	return field;
+}
+
 function renderNode(step) {
 	const node = document.createElement('div');
 	const input = step.kind === 'input';
-	node.className = `node ${input ? 'input' : 'agent'}`;
+	const condition = step.kind === 'condition';
+	node.className = `node ${input ? 'input' : condition ? 'condition' : 'agent'}`;
 	node.dataset.id = step.id;
 	node.style.left = `${step.x ?? 24}px`;
 	node.style.top = `${step.y ?? 24}px`;
@@ -154,6 +186,17 @@ function renderNode(step) {
 		hint.className = 'node-hint';
 		hint.textContent = wording.inputHint;
 		node.append(hint);
+		node.append(makePort('out'));
+	} else if (condition) {
+		const hint = document.createElement('p');
+		hint.className = 'node-hint';
+		hint.textContent = wording.condition;
+		node.append(hint);
+		const detail = document.createElement('div');
+		detail.className = 'meta';
+		detail.append(typeBadge('GateResult'));
+		node.append(detail);
+		node.append(makePort('out'));
 	} else {
 		const agent = step.agentId ? agentsById.get(step.agentId) : undefined;
 		const meta = agentMeta(agent);
@@ -185,6 +228,7 @@ function renderNode(step) {
 			}
 		});
 		node.append(select);
+		node.append(producesSelect(step));
 
 		const detail = document.createElement('div');
 		detail.className = 'meta';
@@ -212,10 +256,6 @@ function renderNode(step) {
 			node.append(label);
 			node.append(tree);
 		}
-		node.append(makePort('out'));
-	}
-
-	if (input) {
 		node.append(makePort('out'));
 	}
 
@@ -266,6 +306,7 @@ function renderWires() {
 	nodesLayer.style.width = wires.style.width = `${maxX}px`;
 	nodesLayer.style.height = wires.style.height = `${maxY}px`;
 	wires.setAttribute('viewBox', `0 0 ${maxX} ${maxY}`);
+	const byId = new Map(steps.map(value => [value.id, value]));
 	for (const step of steps) {
 		for (const sourceId of step.inputs) {
 			const from = portCenter(sourceId, 'out');
@@ -289,6 +330,16 @@ function renderWires() {
 				post({ type: 'unlink', from: sourceId, to: step.id });
 			});
 			wires.append(path);
+			const source = byId.get(sourceId);
+			const outputType = source && source.outputType;
+			if (outputType && outputType !== 'Text') {
+				const text = document.createElementNS(svgNs, 'text');
+				text.setAttribute('x', (from.x + to.x) / 2);
+				text.setAttribute('y', (from.y + to.y) / 2);
+				text.setAttribute('class', 'wire-label');
+				text.textContent = typeName(outputType);
+				wires.append(text);
+			}
 		}
 	}
 }
@@ -302,7 +353,7 @@ function render() {
 	}
 	element('actions').hidden = !workflow;
 	const editable = Boolean(workflow) && !readOnly;
-	for (const id of ['add-input', 'add-agent', 'rename', 'delete', 'save']) {
+	for (const id of ['add-input', 'add-agent', 'add-condition', 'rename', 'delete', 'save']) {
 		element(id).hidden = !editable;
 	}
 	const steps = workflow?.steps ?? [];
@@ -415,6 +466,7 @@ element('add-agent').addEventListener('click', () => {
 	}
 	post({ type: 'addNode', kind: 'agent', agentId: snapshot.agents[0].id });
 });
+element('add-condition').addEventListener('click', () => post({ type: 'addNode', kind: 'condition' }));
 element('save').addEventListener('click', () => {
 	if (!snapshot.workflow) {
 		return;

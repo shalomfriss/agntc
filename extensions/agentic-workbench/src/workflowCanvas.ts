@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import * as vscode from 'vscode';
-import { factoryId, FactoryRole, factoryRoles, getAgent, isInputStep, orderedSteps, Workbench, Workflow, WorkflowStep } from './model';
+import { artifactTypes } from './contracts';
+import { factoryId, FactoryRole, factoryRoles, getAgent, isInputStep, orderedSteps, stepKind, Workbench, Workflow, WorkflowStep } from './model';
 import { panelTabsHtml } from './panels';
 import { State } from './state';
 
@@ -91,6 +92,7 @@ export class WorkflowCanvasView implements vscode.WebviewViewProvider, vscode.Di
 			workflow,
 			agents: workbench.agents.map(({ id, name, access, subagents, maxSubagents }) =>
 				({ id, name, access, subagents, maxSubagents })),
+			artifactTypes: Object.values(artifactTypes).map(({ id, name }) => ({ id, name })),
 		});
 	}
 
@@ -102,7 +104,7 @@ export class WorkflowCanvasView implements vscode.WebviewViewProvider, vscode.Di
 			}
 			change(workflow);
 			for (const step of workflow.steps) {
-				if (!isInputStep(step)) {
+				if (stepKind(step) === 'agent') {
 					getAgent(workbench.agents, step.agentId!);
 				}
 			}
@@ -197,21 +199,31 @@ export class WorkflowCanvasView implements vscode.WebviewViewProvider, vscode.Di
 					break;
 				case 'addNode':
 					if (this.selection) {
-						const kind = data.kind === 'input' ? 'input' : 'agent';
+						const kind = data.kind === 'input' || data.kind === 'condition' ? data.kind : 'agent';
 						const agentId = typeof data.agentId === 'string' ? data.agentId : undefined;
 						await this.mutate(this.selection, workflow => {
 							const index = workflow.steps.length;
+							const defaultName = kind === 'input' ? vscode.l10n.t("User input")
+								: kind === 'condition' ? vscode.l10n.t("Quality gate") : vscode.l10n.t("Step {0}", index + 1);
 							const step: WorkflowStep = {
 								id: randomUUID(),
-								name: typeof data.name === 'string' && data.name.trim() ? data.name.trim()
-									: kind === 'input' ? vscode.l10n.t("User input") : vscode.l10n.t("Step {0}", index + 1),
+								name: typeof data.name === 'string' && data.name.trim() ? data.name.trim() : defaultName,
 								kind, agentId: kind === 'agent' ? agentId : undefined, inputs: [],
+								outputType: kind === 'condition' ? 'GateResult' : undefined,
 								x: 24, y: 24 + index * 128,
 							};
 							if (kind === 'agent' && !agentId) {
 								throw new Error(vscode.l10n.t("Choose an agent for this node."));
 							}
 							workflow.steps.push(step);
+						});
+					}
+					break;
+				case 'setOutputType':
+					if (this.selection && typeof data.outputType === 'string') {
+						await this.mutate(this.selection, workflow => {
+							const step = this.step(workflow, data.id);
+							step.outputType = data.outputType === 'Text' ? undefined : data.outputType as string;
 						});
 					}
 					break;
@@ -329,8 +341,11 @@ export class WorkflowCanvasView implements vscode.WebviewViewProvider, vscode.Di
 			deleteConfirm: vscode.l10n.t("Delete this workflow?"),
 			addInput: vscode.l10n.t("Add Input"),
 			addAgent: vscode.l10n.t("Add Agent"),
+			addCondition: vscode.l10n.t("Add Gate"),
 			save: vscode.l10n.t("Save"),
 			run: vscode.l10n.t("Run"),
+			outputType: vscode.l10n.t("Produces"),
+			condition: vscode.l10n.t("Quality gate · waits for all inputs to pass"),
 			rename: vscode.l10n.t("Rename"),
 			remove: vscode.l10n.t("Remove"),
 			delete: vscode.l10n.t("Delete"),
@@ -375,6 +390,7 @@ export class WorkflowCanvasView implements vscode.WebviewViewProvider, vscode.Di
 			<div class="actions" id="actions">
 				<button type="button" id="add-input" class="secondary">${escapeHtml(wording.addInput)}</button>
 				<button type="button" id="add-agent" class="secondary">${escapeHtml(wording.addAgent)}</button>
+				<button type="button" id="add-condition" class="secondary">${escapeHtml(wording.addCondition)}</button>
 				<button type="button" id="rename" class="secondary">${escapeHtml(wording.rename)}</button>
 				<button type="button" id="delete" class="text-button delete">${escapeHtml(wording.delete)}</button>
 				<button type="button" id="save" class="secondary">${escapeHtml(wording.save)}</button>
