@@ -1,0 +1,213 @@
+{
+	"name": "agentic-workbench",
+	"displayName": "Agentic Workbench",
+	"description": "Built-in agent and workflow tools for Agentic Workbench.",
+	"version": "0.1.0",
+	"publisher": "agentic-workbench",
+	"license": "MIT",
+	"engines": {
+		"vscode": "^1.104.0"
+	},
+	"categories": [
+		"Machine Learning",
+		"Other"
+	],
+	"extensionKind": [
+		"workspace"
+	],
+	"main": "./dist/extension.js",
+	"scripts": {
+		"build": "node esbuild.mts",
+		"test": "tsc && node --test test/*.test.cjs"
+	},
+	"devDependencies": {
+		"@types/node": "^22.0.0",
+		"typescript": "^5.9.3"
+	},
+	"dependencies": {
+		"diff": "^8.0.0"
+	},
+	"capabilities": {
+		"untrustedWorkspaces": {
+			"supported": "limited",
+			"description": "Running agents and workflows requires a trusted workspace."
+		},
+		"virtualWorkspaces": {
+			"supported": false
+		}
+	},
+	"contributes": {
+		"viewsContainers": {
+			"activitybar": [
+				{
+					"id": "agenticWorkbench",
+					"title": "Agentic Workbench",
+					"icon": "media/agentic.svg"
+				}
+			],
+			"secondarySidebar": [
+				{
+					"id": "agenticAgentDetails",
+					"title": "Agent Details",
+					"icon": "media/agentic.svg"
+				}
+			]
+		},
+		"views": {
+			"agenticWorkbench": [
+				{
+					"id": "agentic.workbench",
+					"name": "Workbench"
+				},
+				{
+					"id": "agentic.workflowCanvas",
+					"name": "Details",
+					"type": "webview",
+					"when": "agenticWorkbench.panel == 'workflow'"
+				},
+				{
+					"id": "agentic.output",
+					"name": "Details",
+					"type": "webview",
+					"when": "agenticWorkbench.panel == 'output'"
+				}
+			],
+			"agenticAgentDetails": [
+				{
+					"id": "agentic.agentDetails",
+					"name": "Agent Details",
+					"type": "webview",
+					"icon": "media/agentic.svg"
+				}
+			]
+		},
+		"commands": [
+			{
+				"command": "agentic.connectProvider",
+				"title": "Connect AI Provider",
+				"category": "Agentic",
+				"icon": "$(plug)"
+			},
+			{
+				"command": "agentic.editProvider",
+				"title": "Manage AI Provider",
+				"category": "Agentic"
+			},
+			{
+				"command": "agentic.createAgent",
+				"title": "Create Agent",
+				"category": "Agentic",
+				"icon": "$(add)"
+			},
+			{
+				"command": "agentic.editAgent",
+				"title": "Open Agent Details",
+				"category": "Agentic"
+			},
+			{
+				"command": "agentic.runAgent",
+				"title": "Run Agent",
+				"category": "Agentic",
+				"icon": "$(play)"
+			},
+			{
+				"command": "agentic.createWorkflow",
+				"title": "Create Workflow",
+				"category": "Agentic"
+			},
+			{
+				"command": "agentic.editWorkflow",
+				"title": "Manage Workflow",
+				"category": "Agentic"
+			},
+			{
+				"command": "agentic.openWorkflowCanvas",
+				"title": "Open Workflow Canvas",
+				"category": "Agentic",
+				"icon": "$(type-hierarchy)"
+			},
+			{
+				"command": "agentic.runWorkflow",
+				"title": "Run Workflow",
+				"category": "Agentic",
+				"icon": "$(play)"
+			},
+			{
+				"command": "agentic.runCodeFactory",
+				"title": "Run Code Factory",
+				"category": "Agentic"
+			},
+			{
+				"command": "agentic.cancelRun",
+				"title": "Cancel Current Run",
+				"category": "Agentic"
+			},
+			{
+				"command": "agentic.openRun",
+				"title": "Open Run Output",
+				"category": "Agentic"
+			},
+			{
+				"command": "agentic.openReport",
+				"title": "Open Full Run Report",
+				"category": "Agentic"
+			}
+		],
+		"menus": {
+			"view/title": [
+				{
+					"command": "agentic.connectProvider",
+					"when": "view == agentic.workbench",
+					"group": "navigation"
+				},
+				{
+					"command": "agentic.createAgent",
+					"when": "view == agentic.workbench",
+					"group": "navigation@2"
+				},
+				{
+					"command": "agentic.createWorkflow",
+					"when": "view == agentic.workbench",
+					"group": "1_create"
+				}
+			],
+			"view/item/context": [
+				{
+					"command": "agentic.runWorkflow",
+					"when": "view == agentic.workbench && viewItem == workflow",
+					"group": "inline"
+				},
+				{
+					"command": "agentic.runAgent",
+					"when": "view == agentic.workbench && viewItem == agent",
+					"group": "inline"
+				},
+				{
+					"command": "agentic.openWorkflowCanvas",
+					"when": "view == agentic.workbench && viewItem == workflow",
+					"group": "inline@0"
+				},
+				{
+					"command": "agentic.editWorkflow",
+					"when": "view == agentic.workbench && viewItem == workflow"
+				},
+				{
+					"command": "agentic.openWorkflowCanvas",
+					"when": "view == agentic.workbench && viewItem == workflow"
+				},
+				{
+					"command": "agentic.editAgent",
+					"when": "view == agentic.workbench && viewItem == agent"
+				},
+				{
+					"command": "agentic.editProvider",
+					"when": "view == agentic.workbench && viewItem == provider"
+				},
+				{
+					"command": "agentic.openReport",
+					"when": "view == agentic.workbench && viewItem == run"
+				}
+			]
+		}
+	}
+}

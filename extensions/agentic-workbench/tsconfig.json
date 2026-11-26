@@ -1,0 +1,26 @@
+{
+	"compilerOptions": {
+		"target": "ES2022",
+		"module": "Node16",
+		"strict": true,
+		"outDir": "out-test",
+		"rootDir": "src",
+		"lib": [
+			"ES2022"
+		],
+		"sourceMap": true,
+		"noEmitOnError": true,
+		"types": [
+			"node"
+		],
+		"paths": {
+			"vscode": [
+				"../../src/vscode-dts/vscode.d.ts"
+			]
+		}
+	},
+	"include": [
+		"src/**/*.ts",
+		"../../src/vscode-dts/vscode.d.ts"
+	]
+}
