@@ -256,6 +256,12 @@ export interface WorkflowHandlers {
 	resolveWorkflow?: (id: string) => Workflow | undefined;
 	/** When set, the run halts just before this step id and reports its resolved inputs. */
 	stopBefore?: string;
+	/** Step ids to pause before. The run awaits onPause, then continues when it resolves. */
+	breakpoints?: Set<string>;
+	/** Awaited at a breakpoint; resolve to continue, throw to stop the run. */
+	onPause?: (step: WorkflowStep, inputs: StepInput[]) => Promise<void>;
+	/** Pre-produced outputs keyed by step id. Seeded steps are reused instead of re-run (used to fork a run). */
+	seed?: Record<string, string>;
 }
 
 export async function runWorkflow(
@@ -275,12 +281,21 @@ export async function runWorkflow(
 	await runner.prepare(agentSteps.map(step => step.agentId!));
 	const steps = new Map(workflow.steps.map(step => [step.id, step]));
 	const outputs = new Map<string, string>();
+	for (const [id, value] of Object.entries(handlers.seed ?? {})) {
+		outputs.set(id, value);
+	}
 	const label = (step: WorkflowStep) => `## Input from ${step.name}${step.outputType && step.outputType !== 'Text' ? ` (${step.outputType})` : ''}`;
 	for (const step of ordered) {
 		const kind = stepKind(step);
+		if (handlers.seed && Object.prototype.hasOwnProperty.call(handlers.seed, step.id)) {
+			continue;
+		}
 		if (handlers.stopBefore && step.id === handlers.stopBefore) {
 			const resolved = step.inputs.map(id => `## Input from ${steps.get(id)!.name}\n\n${outputs.get(id) ?? '(not produced)'}`);
 			return `# Stopped before ${step.name}\n\n${resolved.length ? resolved.join('\n\n') : 'This step has no inputs.'}\n`;
+		}
+		if (handlers.breakpoints?.has(step.id) && handlers.onPause) {
+			await handlers.onPause(step, step.inputs.map(id => ({ name: steps.get(id)!.name, output: outputs.get(id) ?? '' })));
 		}
 		if (kind === 'input') {
 			outputs.set(step.id, inputValues[step.id] ?? task);

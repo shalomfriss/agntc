@@ -28,6 +28,8 @@ export interface WorkflowStep {
 	command?: string;
 	/** Referenced workflow id for a subworkflow step. */
 	workflowId?: string;
+	/** When true, the run pauses just before this step so you can inspect and resume. */
+	breakpoint?: boolean;
 	/** Optional canvas coordinates for visual layout. */
 	x?: number;
 	y?: number;

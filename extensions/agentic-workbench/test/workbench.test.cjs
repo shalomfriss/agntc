@@ -287,6 +287,55 @@ test('stop-before-step runs upstream steps and reports resolved inputs without r
 	assert.match(result, /Input from First\n\nfirst out/);
 });
 
+test('breakpoints pause before a step with its resolved inputs, then resume', async () => {
+	const workflow = {
+		id: 'bp', name: 'BP',
+		steps: [
+			{ id: 'a', name: 'First', kind: 'agent', agentId: 'alpha', inputs: [] },
+			{ id: 'b', name: 'Second', kind: 'agent', agentId: 'beta', inputs: ['a'] },
+		],
+	};
+	const ran = [];
+	const paused = [];
+	const { runner } = mocks([agent('alpha'), agent('beta')], undefined, {
+		alpha: [() => { ran.push('alpha'); return output('first out'); }],
+		beta: [() => { ran.push('beta'); return output('second out'); }],
+	});
+	const result = await runWorkflow(workflow, 'task', runner, {}, {
+		breakpoints: new Set(['b']),
+		onPause: async (step, inputs) => { paused.push({ step: step.name, input: inputs[0] && inputs[0].output }); },
+	});
+	assert.deepEqual(ran, ['alpha', 'beta']);
+	assert.deepEqual(paused, [{ step: 'Second', input: 'first out' }]);
+	assert.match(result, /second out/);
+});
+
+test('a thrown pause stops the run at the breakpoint', async () => {
+	const workflow = { id: 'bp2', name: 'BP2', steps: [{ id: 'a', name: 'Only', kind: 'agent', agentId: 'alpha', inputs: [] }] };
+	const { runner } = mocks([agent('alpha')], undefined, { alpha: [() => output('x')] });
+	await assert.rejects(runWorkflow(workflow, 'task', runner, {}, {
+		breakpoints: new Set(['a']), onPause: async () => { throw new Error('Run stopped at a breakpoint.'); },
+	}), /stopped at a breakpoint/);
+});
+
+test('seeded outputs are reused so a forked run only re-executes downstream steps', async () => {
+	const workflow = {
+		id: 'fork', name: 'Fork',
+		steps: [
+			{ id: 'a', name: 'First', kind: 'agent', agentId: 'alpha', inputs: [] },
+			{ id: 'b', name: 'Second', kind: 'agent', agentId: 'beta', inputs: ['a'] },
+		],
+	};
+	const ran = [];
+	const { runner } = mocks([agent('alpha'), agent('beta')], undefined, {
+		alpha: [() => { ran.push('alpha'); return output('fresh'); }],
+		beta: [(_, history) => { ran.push('beta'); assert.match(history[0].content, /pinned first/); return output('second out'); }],
+	});
+	const result = await runWorkflow(workflow, 'task', runner, {}, { seed: { a: 'pinned first' } });
+	assert.deepEqual(ran, ['beta']);
+	assert.match(result, /second out/);
+});
+
 test('a quality gate fails when an upstream review requests revision', async () => {
 	const workflow = {
 		id: 'gated', name: 'Gated',
