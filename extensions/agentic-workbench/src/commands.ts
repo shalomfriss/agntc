@@ -489,8 +489,23 @@ export class Commands implements vscode.Disposable {
 				runCommand: command => this.runToolCommand(command, workspace.cwd, signal),
 				decide: (step, inputs) => this.humanDecision(step.name, inputs),
 				resolveWorkflow: refId => this.state.workbench.workflows.find(value => value.id === refId),
+				breakpoints: new Set(workflow.steps.filter(step => step.breakpoint).map(step => step.id)),
+				onPause: (step, inputs) => this.pauseAt(step.name, inputs),
 				stopBefore,
 			}));
+	}
+
+	private async pauseAt(name: string, inputs: StepInput[]): Promise<void> {
+		const resume = vscode.l10n.t("Resume");
+		const stop = vscode.l10n.t("Stop");
+		const detail = inputs.length
+			? inputs.map(input => `${input.name}:\n${input.output.slice(0, 1000)}`).join('\n\n')
+			: vscode.l10n.t("No inputs resolved yet.");
+		const choice = await vscode.window.showInformationMessage(
+			vscode.l10n.t("Paused before {0}. Inspect, then resume or stop.", name), { modal: true, detail }, resume, stop);
+		if (choice !== resume) {
+			throw new Error('Run stopped at a breakpoint.');
+		}
 	}
 
 	private async humanDecision(name: string, inputs: StepInput[]): Promise<{ approved: boolean; reason: string }> {
