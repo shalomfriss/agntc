@@ -108,6 +108,12 @@ function renderInspector() {
 		runTo.textContent = wording.runToHere;
 		runTo.addEventListener('click', () => post({ type: 'runTo', id: step.id }));
 		inspector.append(runTo);
+		const bp = document.createElement('button');
+		bp.type = 'button';
+		bp.className = 'text-button inspect-bp';
+		bp.textContent = step.breakpoint ? wording.removeBreakpoint : wording.addBreakpoint;
+		bp.addEventListener('click', () => post({ type: 'setBreakpoint', id: step.id, on: !step.breakpoint }));
+		inspector.append(bp);
 	}
 	inspector.hidden = false;
 }
@@ -230,6 +236,12 @@ function renderNode(step) {
 
 	node.classList.toggle('readonly', readOnly);
 	node.classList.toggle('selected', step.id === selectedId);
+	if (step.breakpoint) {
+		const dot = document.createElement('span');
+		dot.className = 'breakpoint-dot';
+		dot.title = wording.removeBreakpoint;
+		node.append(dot);
+	}
 
 	const header = document.createElement('header');
 	const title = document.createElement('span');

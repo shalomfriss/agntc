@@ -356,6 +356,14 @@ export class WorkflowCanvasView implements vscode.WebviewViewProvider, vscode.Di
 						await vscode.commands.executeCommand('agentic.runToStep', this.selection, data.id);
 					}
 					break;
+				case 'setBreakpoint':
+					if (this.selection && this.selection !== factoryId) {
+						await this.mutate(this.selection, workflow => {
+							const step = this.step(workflow, data.id);
+							step.breakpoint = Boolean(data.on);
+						});
+					}
+					break;
 				case 'editAgent':
 					if (typeof data.agentId === 'string') {
 						await vscode.commands.executeCommand('agentic.editAgent', data.agentId);
@@ -405,6 +413,8 @@ export class WorkflowCanvasView implements vscode.WebviewViewProvider, vscode.Di
 			inspectNone: vscode.l10n.t("No inputs connected."),
 			inspectContract: vscode.l10n.t("Contract fields"),
 			runToHere: vscode.l10n.t("Run to here"),
+			addBreakpoint: vscode.l10n.t("Add breakpoint"),
+			removeBreakpoint: vscode.l10n.t("Remove breakpoint"),
 			rename: vscode.l10n.t("Rename"),
 			remove: vscode.l10n.t("Remove"),
 			delete: vscode.l10n.t("Delete"),
