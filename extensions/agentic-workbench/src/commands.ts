@@ -85,7 +85,7 @@ export class Commands implements vscode.Disposable {
 			openReport: (id?: string) => this.openReport(id),
 			compareRuns: () => this.compareRuns(),
 		};
-		return Object.entries(handlers).map(([command, handler]) =>
+		const registrations = Object.entries(handlers).map(([command, handler]) =>
 			vscode.commands.registerCommand(`agentic.${command}`, async (item?: WorkbenchItem | string) => {
 				try {
 					await handler(typeof item === 'string' ? item : item?.key);
@@ -93,6 +93,9 @@ export class Commands implements vscode.Disposable {
 					void vscode.window.showErrorMessage((error as Error).message);
 				}
 			}));
+		registrations.push(vscode.commands.registerCommand('agentic.runToStep', (workflowId?: string, stepId?: string) =>
+			this.runWorkflow(workflowId, stepId).catch(error => void vscode.window.showErrorMessage((error as Error).message))));
+		return registrations;
 	}
 
 	private providerChoices(): Choice<ProviderProfile>[] {
@@ -458,7 +461,7 @@ export class Commands implements vscode.Disposable {
 		}
 	}
 
-	private async runWorkflow(id?: string): Promise<void> {
+	private async runWorkflow(id?: string, stopBefore?: string): Promise<void> {
 		id ??= await this.selectWorkflow('Run workflow');
 		if (!id) {
 			return;
@@ -486,6 +489,7 @@ export class Commands implements vscode.Disposable {
 				runCommand: command => this.runToolCommand(command, workspace.cwd, signal),
 				decide: (step, inputs) => this.humanDecision(step.name, inputs),
 				resolveWorkflow: refId => this.state.workbench.workflows.find(value => value.id === refId),
+				stopBefore,
 			}));
 	}
 

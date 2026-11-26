@@ -101,6 +101,14 @@ function renderInspector() {
 	}).filter(Boolean);
 	body.append(row(wording.inspectInputs, sources.length ? sources.join(', ') : wording.inspectNone));
 	inspector.replaceChildren(title, body);
+	if (!readOnly && step.kind !== 'input') {
+		const runTo = document.createElement('button');
+		runTo.type = 'button';
+		runTo.className = 'secondary inspect-run';
+		runTo.textContent = wording.runToHere;
+		runTo.addEventListener('click', () => post({ type: 'runTo', id: step.id }));
+		inspector.append(runTo);
+	}
 	inspector.hidden = false;
 }
 

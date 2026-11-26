@@ -40,6 +40,7 @@ body.vscode-dark, body.vscode-high-contrast { color-scheme: dark; }
 .inspect-row { display: flex; gap: 8px; padding: 2px 0; font-size: 12px; }
 .inspect-key { flex: 0 0 96px; color: var(--muted); }
 .inspect-value { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.inspect-run { margin-top: 8px; }
 #root > .panel-tabs { margin: 0 -10px 4px; }
 .toolbar { display: grid; gap: 7px; }
 .toolbar .field { display: flex; gap: 6px; align-items: center; }
