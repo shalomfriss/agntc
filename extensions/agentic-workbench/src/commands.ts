@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import * as vscode from 'vscode';
 import { AgentDetailsView } from './agentDetails';
 import { Agent, factoryId, FactoryRole, factoryRoles, getAgent, isInputStep, modes, PlanningMode, Workflow, WorkflowStep } from './model';
+import { loadProjectMemory } from './memory';
 import { OutputView, PersistedRun } from './output';
 import { Panel, panelContextKey } from './panels';
 import { ProcessError, runProcess } from './process';
@@ -535,11 +536,17 @@ export class Commands implements vscode.Disposable {
 		}, async (progress, cancellation) => {
 			const subscription = cancellation.onCancellationRequested(() => abort.abort());
 			try {
+				const memory = await loadProjectMemory(folder.uri.fsPath);
 				const agents = await Promise.all(this.state.workbench.agents.map(async agent => {
+					const parts = [agent.instructions];
 					const contents = await loadSkillContents(agent.skills ?? []);
-					return contents.length
-						? { ...agent, instructions: `${agent.instructions}\n\n## Skills you can use\n\n${contents.join('\n\n')}` }
-						: agent;
+					if (contents.length) {
+						parts.push(`## Skills you can use\n\n${contents.join('\n\n')}`);
+					}
+					if (memory) {
+						parts.push(`## Project memory\n\n${memory}`);
+					}
+					return parts.length > 1 ? { ...agent, instructions: parts.join('\n\n') } : agent;
 				}));
 				const runner = new AgentRunner(agents, async agent => {
 					const profile = providers.profiles.find(value => value.id === (agent.providerId ?? providers.defaultId));
