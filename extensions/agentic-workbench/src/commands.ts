@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import * as vscode from 'vscode';
 import { AgentDetailsView } from './agentDetails';
+import { composeSystemPrompt, parseWorkflowDraft } from './compose';
 import { Agent, factoryId, FactoryRole, factoryRoles, getAgent, isInputStep, modes, PlanningMode, Workflow, WorkflowStep } from './model';
 import { loadProjectMemory } from './memory';
 import { OutputView, PersistedRun } from './output';
@@ -73,6 +74,7 @@ export class Commands implements vscode.Disposable {
 			editAgent: (id?: string) => this.details.show(id),
 			runAgent: (id?: string) => this.runAgent(id),
 			createWorkflow: () => this.createWorkflow(),
+			composeWorkflow: () => this.composeWorkflow(),
 			editWorkflow: (id?: string) => this.editWorkflow(id),
 			openWorkflowCanvas: async (id?: string) => { await this.showPanel('workflow'); await this.canvas.show(id); },
 			openPanel: (panel?: string) => this.revealPanel(panel),
@@ -266,6 +268,40 @@ export class Commands implements vscode.Disposable {
 		const workflow = { id: randomUUID(), name, steps: [] };
 		await this.state.updateWorkbench(workbench => workbench.workflows.push(workflow));
 		await this.editWorkflow(workflow.id);
+	}
+
+	private async composeWorkflow(): Promise<void> {
+		if (!this.state.providers.profiles.length) {
+			await this.connectProvider();
+			if (!this.state.providers.profiles.length) {
+				return;
+			}
+		}
+		const description = await input('Describe the workflow to generate');
+		if (!description) {
+			return;
+		}
+		const providers = this.state.providers;
+		const profile = providers.profiles.find(value => value.id === providers.defaultId) ?? providers.profiles[0];
+		const agents = this.state.workbench.agents;
+		const workflow = await vscode.window.withProgress({
+			location: vscode.ProgressLocation.Notification, title: 'Composing workflow', cancellable: true,
+		}, async (_, cancellation) => {
+			const abort = new AbortController();
+			const subscription = cancellation.onCancellationRequested(() => abort.abort());
+			try {
+				const model = await resolveModel(profile, await this.state.secret(profile.id));
+				const answer = await model.request(composeSystemPrompt(agents), [{ role: 'user', content: description }],
+					AbortSignal.any([abort.signal, AbortSignal.timeout(120_000)]));
+				return parseWorkflowDraft(answer, agents);
+			} finally {
+				subscription.dispose();
+			}
+		});
+		await this.state.updateWorkbench(workbench => workbench.workflows.push(workflow));
+		await this.showPanel('workflow');
+		await this.canvas.show(workflow.id);
+		void vscode.window.showInformationMessage(vscode.l10n.t("Created \"{0}\". Review and adjust it in the canvas.", workflow.name));
 	}
 
 	private selectWorkflow(title: string): Promise<string | undefined> {

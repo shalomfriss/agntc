@@ -116,6 +116,12 @@
 				"category": "Agentic"
 			},
 			{
+				"command": "agentic.composeWorkflow",
+				"title": "Compose Workflow with AI",
+				"category": "Agentic",
+				"icon": "$(sparkle)"
+			},
+			{
 				"command": "agentic.editWorkflow",
 				"title": "Manage Workflow",
 				"category": "Agentic"
@@ -172,6 +178,11 @@
 				},
 				{
 					"command": "agentic.createWorkflow",
+					"when": "view == agentic.workbench",
+					"group": "1_create"
+				},
+				{
+					"command": "agentic.composeWorkflow",
 					"when": "view == agentic.workbench",
 					"group": "1_create"
 				}
