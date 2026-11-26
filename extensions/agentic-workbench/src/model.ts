@@ -12,7 +12,7 @@ export interface Agent {
 	skills?: string[];
 }
 
-export type StepKind = 'agent' | 'input' | 'condition' | 'tool' | 'human';
+export type StepKind = 'agent' | 'input' | 'condition' | 'tool' | 'human' | 'subworkflow';
 
 export interface WorkflowStep {
 	id: string;
@@ -24,6 +24,10 @@ export interface WorkflowStep {
 	inputs: string[];
 	/** Id of the artifact type this step produces (see contracts.ts). Defaults to Text. */
 	outputType?: string;
+	/** Shell command for a tool step. */
+	command?: string;
+	/** Referenced workflow id for a subworkflow step. */
+	workflowId?: string;
 	/** Optional canvas coordinates for visual layout. */
 	x?: number;
 	y?: number;

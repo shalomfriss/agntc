@@ -237,12 +237,37 @@ function passSignal(output: string): { ok: boolean; reason: string } {
 	return { ok: false, reason: 'no pass/fail signal' };
 }
 
+export interface CommandResult {
+	code: number;
+	output: string;
+}
+
+export interface StepInput {
+	name: string;
+	output: string;
+}
+
+export interface WorkflowHandlers {
+	/** Executes a tool step's command and returns its exit code and combined output. */
+	runCommand?: (command: string) => Promise<CommandResult>;
+	/** Resolves a human-decision step with the developer's accept/revise choice. */
+	decide?: (step: WorkflowStep, inputs: StepInput[]) => Promise<{ approved: boolean; reason: string }>;
+	/** Resolves a subworkflow step's referenced workflow. */
+	resolveWorkflow?: (id: string) => Workflow | undefined;
+}
+
 export async function runWorkflow(
 	workflow: Workflow, task: string, runner: AgentRunner, inputValues: Record<string, string> = {},
+	handlers: WorkflowHandlers = {}, visited: Set<string> = new Set(),
 ): Promise<string> {
+	if (visited.has(workflow.id)) {
+		throw new Error(`Workflow "${workflow.name}" is referenced recursively by a subworkflow step.`);
+	}
+	visited.add(workflow.id);
 	const agentSteps = workflow.steps.filter(step => stepKind(step) === 'agent');
-	if (!workflow.steps.some(step => stepKind(step) === 'agent' || stepKind(step) === 'condition')) {
-		throw new Error('Add at least one agent or condition step before running this workflow.');
+	const executable = new Set(['agent', 'condition', 'tool', 'human', 'subworkflow']);
+	if (!workflow.steps.some(step => executable.has(stepKind(step)))) {
+		throw new Error('Add at least one runnable step before running this workflow.');
 	}
 	const ordered = orderedSteps(workflow);
 	await runner.prepare(agentSteps.map(step => step.agentId!));
@@ -264,6 +289,46 @@ export async function runWorkflow(
 			const result = JSON.stringify({ passed, reasons });
 			outputs.set(step.id, result);
 			runner.recordStep({ name: step.name, agent: 'Quality gate', kind: 'condition', outputType: 'GateResult', output: result });
+			continue;
+		}
+		if (kind === 'tool') {
+			if (!step.command?.trim()) {
+				throw new Error(`Tool step "${step.name}" has no command configured.`);
+			}
+			if (!handlers.runCommand) {
+				throw new Error('This run cannot execute tool steps.');
+			}
+			const { code, output } = await handlers.runCommand(step.command);
+			const report = JSON.stringify({
+				passed: code === 0, total: 1, failures: code === 0 ? [] : [output.slice(0, 2000).trim() || `Exited with ${code}.`],
+			});
+			outputs.set(step.id, report);
+			runner.recordStep({ name: step.name, agent: 'Tool', kind: 'tool', outputType: 'TestReport', output: report });
+			continue;
+		}
+		if (kind === 'human') {
+			if (!handlers.decide) {
+				throw new Error('This run cannot resolve human-decision steps.');
+			}
+			const inputs = step.inputs.map(id => ({ name: steps.get(id)!.name, output: outputs.get(id) ?? '' }));
+			const decision = await handlers.decide(step, inputs);
+			const report = JSON.stringify({
+				verdict: decision.approved ? 'approve' : 'revise',
+				reason: decision.reason.trim() || (decision.approved ? 'Accepted.' : 'Revision requested.'),
+			});
+			outputs.set(step.id, report);
+			runner.recordStep({ name: step.name, agent: 'Human', kind: 'human', outputType: 'ReviewReport', output: report });
+			continue;
+		}
+		if (kind === 'subworkflow') {
+			const sub = step.workflowId ? handlers.resolveWorkflow?.(step.workflowId) : undefined;
+			if (!sub) {
+				throw new Error(`Subworkflow step "${step.name}" references a workflow that no longer exists.`);
+			}
+			const subTask = step.inputs.length ? step.inputs.map(id => outputs.get(id) ?? '').join('\n\n') : task;
+			const output = await runWorkflow(sub, subTask, runner, {}, handlers, new Set(visited));
+			outputs.set(step.id, output);
+			runner.recordStep({ name: step.name, agent: 'Subworkflow', kind: 'subworkflow', outputType: step.outputType, output });
 			continue;
 		}
 		if (kind !== 'agent') {
