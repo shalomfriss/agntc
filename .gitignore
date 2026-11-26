@@ -44,3 +44,8 @@ dist
 .github/prompts/*.local.prompt.md
 .agents/skills/.local/
 .github/skills/.local/
+
+# Agentic Workbench desktop packages and local build tools
+/release/
+/.build-tools/
+/extensions/agentic-workbench/out-test/
