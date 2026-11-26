@@ -112,6 +112,17 @@ type GettingStartedStartEntryContent = BuiltinGettingStartedStartEntry[];
 
 export const startEntries: GettingStartedStartEntryContent = [
 	{
+		id: 'agenticWorkbench',
+		title: localize('gettingStarted.agenticWorkbench.title', "Open Agentic Workbench"),
+		description: localize('gettingStarted.agenticWorkbench.description', "Connect AI providers, compose agents, and run Code Factory."),
+		icon: Codicon.hubot,
+		when: '!isWeb',
+		content: {
+			type: 'startEntry',
+			command: 'command:agentic.workbench.focus',
+		}
+	},
+	{
 		id: 'welcome.showNewFileEntries',
 		title: localize('gettingStarted.newFile.title', "New File..."),
 		description: localize('gettingStarted.newFile.description', "Open a new untitled text file, notebook, or custom editor."),
