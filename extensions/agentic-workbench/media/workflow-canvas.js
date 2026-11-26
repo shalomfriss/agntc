@@ -465,7 +465,7 @@ function render() {
 	}
 	element('actions').hidden = !workflow;
 	const editable = Boolean(workflow) && !readOnly;
-	for (const id of ['add-input', 'add-agent', 'add-condition', 'add-tool', 'add-human', 'add-sub', 'rename', 'delete', 'save']) {
+	for (const id of ['add-input', 'add-agent', 'add-condition', 'add-tool', 'add-human', 'add-sub', 'rename', 'delete', 'save', 'validate']) {
 		element(id).hidden = !editable;
 	}
 	const steps = workflow?.steps ?? [];
@@ -592,6 +592,7 @@ element('save').addEventListener('click', () => {
 	}));
 	post({ type: 'saveLayout', positions });
 });
+element('validate').addEventListener('click', () => post({ type: 'validate' }));
 element('run').addEventListener('click', () => post({ type: 'run' }));
 
 window.addEventListener('message', ({ data }) => {

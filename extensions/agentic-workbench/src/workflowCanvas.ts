@@ -4,6 +4,7 @@ import { artifactTypes } from './contracts';
 import { factoryId, FactoryRole, factoryRoles, getAgent, isInputStep, orderedSteps, stepKind, Workbench, Workflow, WorkflowStep } from './model';
 import { panelTabsHtml } from './panels';
 import { State } from './state';
+import { validateWorkflow } from './validateWorkflow';
 
 export const workflowCanvasViewId = 'agentic.workflowCanvas';
 
@@ -335,6 +336,16 @@ export class WorkflowCanvasView implements vscode.WebviewViewProvider, vscode.Di
 						await respond({ type: 'status', text: vscode.l10n.t("Workflow saved.") });
 					}
 					break;
+				case 'validate':
+					if (this.selection && this.selection !== factoryId) {
+						const workflow = this.state.workbench.workflows.find(value => value.id === this.selection);
+						if (workflow) {
+							const agentIds = new Set(this.state.workbench.agents.map(value => value.id));
+							const issues = validateWorkflow(workflow, agentIds);
+							await respond({ type: 'status', text: issues.length ? issues.join(' ') : vscode.l10n.t("All checks passed.") });
+						}
+					}
+					break;
 				case 'run':
 					if (this.selection) {
 						await vscode.commands.executeCommand('agentic.runWorkflow', this.selection);
@@ -378,6 +389,7 @@ export class WorkflowCanvasView implements vscode.WebviewViewProvider, vscode.Di
 			addHuman: vscode.l10n.t("Add Review"),
 			addSub: vscode.l10n.t("Add Subworkflow"),
 			save: vscode.l10n.t("Save"),
+			validate: vscode.l10n.t("Validate"),
 			run: vscode.l10n.t("Run"),
 			outputType: vscode.l10n.t("Produces"),
 			condition: vscode.l10n.t("Quality gate · waits for all inputs to pass"),
@@ -444,6 +456,7 @@ export class WorkflowCanvasView implements vscode.WebviewViewProvider, vscode.Di
 				<button type="button" id="rename" class="secondary">${escapeHtml(wording.rename)}</button>
 				<button type="button" id="delete" class="text-button delete">${escapeHtml(wording.delete)}</button>
 				<button type="button" id="save" class="secondary">${escapeHtml(wording.save)}</button>
+				<button type="button" id="validate" class="secondary">${escapeHtml(wording.validate)}</button>
 				<button type="button" id="run" title="${escapeHtml(wording.runTitle)}">${escapeHtml(wording.run)}</button>
 			</div>
 		</header>
