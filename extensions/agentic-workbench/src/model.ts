@@ -12,7 +12,7 @@ export interface Agent {
 	skills?: string[];
 }
 
-export type StepKind = 'agent' | 'input';
+export type StepKind = 'agent' | 'input' | 'condition' | 'tool' | 'human';
 
 export interface WorkflowStep {
 	id: string;
@@ -22,6 +22,8 @@ export interface WorkflowStep {
 	/** Present for agent steps; absent for input nodes. */
 	agentId?: string;
 	inputs: string[];
+	/** Id of the artifact type this step produces (see contracts.ts). Defaults to Text. */
+	outputType?: string;
 	/** Optional canvas coordinates for visual layout. */
 	x?: number;
 	y?: number;
