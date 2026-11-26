@@ -197,6 +197,77 @@ test('a typed workflow validates artifacts against contracts and evaluates a qua
 	assert.equal(gate.outputType, 'GateResult');
 });
 
+test('a tool step runs a command, produces a TestReport, and feeds a quality gate', async () => {
+	const workflow = {
+		id: 'ci', name: 'CI',
+		steps: [
+			{ id: 'build', name: 'Implement', kind: 'agent', agentId: 'coder', outputType: 'ChangeSet', inputs: [] },
+			{ id: 'test', name: 'Run tests', kind: 'tool', command: 'swift test', outputType: 'TestReport', inputs: ['build'] },
+			{ id: 'gate', name: 'Gate', kind: 'condition', inputs: ['test'] },
+		],
+	};
+	const ran = [];
+	const { runner, stages } = mocks([agent('coder')], undefined, {
+		coder: [() => output(JSON.stringify({ baseRevision: 'HEAD', files: ['a.swift'], summary: 'add' }))],
+	});
+	const result = await runWorkflow(workflow, 'Add feature', runner, {}, {
+		runCommand: async command => {
+			ran.push(command);
+			return { code: 0, output: 'All tests passed' };
+		},
+	});
+	assert.deepEqual(ran, ['swift test']);
+	assert.match(result, /"passed":true/);
+	const tool = stages.find(stage => stage.kind === 'tool');
+	assert.equal(tool.outputType, 'TestReport');
+	assert.match(tool.output, /"passed":true,"total":1/);
+
+	const failedMock = mocks([agent('coder')], undefined, {
+		coder: [() => output(JSON.stringify({ baseRevision: 'HEAD', files: [], summary: 'x' }))],
+	});
+	const failed = await runWorkflow(workflow, 'Add feature', failedMock.runner, {}, {
+		runCommand: async () => ({ code: 1, output: 'test FeatureTests failed' }),
+	});
+	assert.match(failed, /"passed":false/);
+	assert.match(failedMock.stages.find(stage => stage.kind === 'tool').output, /FeatureTests failed/);
+});
+
+test('a human-decision step resolves to an approve or revise verdict', async () => {
+	const workflow = {
+		id: 'hd', name: 'HD',
+		steps: [
+			{ id: 'build', name: 'Implement', kind: 'agent', agentId: 'coder', inputs: [] },
+			{ id: 'human', name: 'Human review', kind: 'human', inputs: ['build'] },
+		],
+	};
+	const seen = [];
+	const { runner, stages } = mocks([agent('coder')], undefined, { coder: [() => output('a change')] });
+	const result = await runWorkflow(workflow, 'Add feature', runner, {}, {
+		decide: async (step, inputs) => { seen.push(inputs[0]); return { approved: true, reason: 'looks good' }; },
+	});
+	assert.equal(seen[0].name, 'Implement');
+	assert.match(seen[0].output, /a change/);
+	assert.match(result, /"verdict":"approve"/);
+	assert.equal(stages.find(stage => stage.kind === 'human').outputType, 'ReviewReport');
+});
+
+test('a subworkflow step runs a referenced workflow and rejects recursion', async () => {
+	const sub = {
+		id: 'sub', name: 'Build and test',
+		steps: [{ id: 's1', name: 'Worker', kind: 'agent', agentId: 'worker', inputs: [] }],
+	};
+	const parent = {
+		id: 'parent', name: 'Parent',
+		steps: [{ id: 'p1', name: 'Delegate', kind: 'subworkflow', workflowId: 'sub', inputs: [] }],
+	};
+	const { runner } = mocks([agent('worker')], undefined, { worker: [() => output('sub done')] });
+	const result = await runWorkflow(parent, 'Go', runner, {}, { resolveWorkflow: id => (id === 'sub' ? sub : undefined) });
+	assert.match(result, /sub done/);
+
+	const loop = { id: 'loop', name: 'Loop', steps: [{ id: 'l1', name: 'Self', kind: 'subworkflow', workflowId: 'loop', inputs: [] }] };
+	await assert.rejects(runWorkflow(loop, 'Go', mocks([], undefined, {}).runner, {}, { resolveWorkflow: () => loop }), /recursively/);
+});
+
 test('a quality gate fails when an upstream review requests revision', async () => {
 	const workflow = {
 		id: 'gated', name: 'Gated',
