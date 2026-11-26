@@ -4,11 +4,12 @@ import { AgentDetailsView } from './agentDetails';
 import { Agent, factoryId, FactoryRole, factoryRoles, getAgent, isInputStep, modes, PlanningMode, Workflow, WorkflowStep } from './model';
 import { OutputView, PersistedRun } from './output';
 import { Panel, panelContextKey } from './panels';
+import { ProcessError, runProcess } from './process';
 import { loadSkillContents } from './skills';
 import { WorkflowCanvasView } from './workflowCanvas';
 import { createPlanning } from './planning';
 import { copilotModels, ProviderKind, providerKinds, ProviderProfile, resolveModel, usesApiKey, validateEndpoint, verifyCliLogin } from './providers';
-import { AgentRunner, checkCancelled, runCodeFactory, RunStage, runWorkflow } from './runner';
+import { AgentRunner, checkCancelled, CommandResult, runCodeFactory, RunStage, runWorkflow, StepInput } from './runner';
 import { RunEntry, State } from './state';
 import { WorkbenchItem } from './tree';
 import { Workspace } from './workspace';
@@ -441,7 +442,43 @@ export class Commands implements vscode.Disposable {
 		if (!workflow) {
 			throw new Error('The workflow no longer exists.');
 		}
-		await this.run(workflow.name, undefined, (task, runner) => runWorkflow(workflow, task, runner));
+		await this.run(workflow.name, undefined, (task, runner, workspace, _id, signal) =>
+			runWorkflow(workflow, task, runner, {}, {
+				runCommand: command => this.runToolCommand(command, workspace.cwd, signal),
+				decide: (step, inputs) => this.humanDecision(step.name, inputs),
+				resolveWorkflow: refId => this.state.workbench.workflows.find(value => value.id === refId),
+			}));
+	}
+
+	private async humanDecision(name: string, inputs: StepInput[]): Promise<{ approved: boolean; reason: string }> {
+		const accept = vscode.l10n.t("Accept");
+		const revise = vscode.l10n.t("Request revision");
+		const summary = inputs.map(input => input.name).join(', ');
+		const choice = await vscode.window.showInformationMessage(
+			summary ? vscode.l10n.t("{0}: review {1}, then decide.", name, summary) : vscode.l10n.t("{0}: decide to continue.", name),
+			{ modal: true, detail: inputs.map(input => `${input.name}:\n${input.output.slice(0, 1000)}`).join('\n\n') },
+			accept, revise);
+		if (choice === accept) {
+			return { approved: true, reason: '' };
+		}
+		if (choice === revise) {
+			const reason = await vscode.window.showInputBox({ title: name, prompt: vscode.l10n.t("What needs to change?") });
+			return { approved: false, reason: reason ?? '' };
+		}
+		throw new Error('Run cancelled at the human-decision step.');
+	}
+
+	private async runToolCommand(command: string, cwd: string, signal: AbortSignal): Promise<CommandResult> {
+		const [exe, flag] = process.platform === 'win32' ? ['cmd.exe', '/c'] : ['/bin/sh', '-c'];
+		try {
+			const { stdout, stderr } = await runProcess(exe, [flag, command], signal, { cwd });
+			return { code: 0, output: `${stdout}${stderr}` };
+		} catch (error) {
+			if (error instanceof ProcessError) {
+				return { code: error.code ?? 1, output: error.output };
+			}
+			throw error;
+		}
 	}
 
 	private async run(name: string, mode: PlanningMode | undefined, execute: (
