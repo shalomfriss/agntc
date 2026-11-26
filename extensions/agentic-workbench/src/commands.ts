@@ -6,6 +6,7 @@ import { loadProjectMemory } from './memory';
 import { OutputView, PersistedRun } from './output';
 import { Panel, panelContextKey } from './panels';
 import { ProcessError, runProcess } from './process';
+import { compareRuns } from './runCompare';
 import { loadSkillContents } from './skills';
 import { WorkflowCanvasView } from './workflowCanvas';
 import { createPlanning } from './planning';
@@ -80,6 +81,7 @@ export class Commands implements vscode.Disposable {
 			cancelRun: () => this.active?.abort(),
 			openRun: (id?: string) => this.openRun(id === 'runs' ? undefined : id),
 			openReport: (id?: string) => this.openReport(id),
+			compareRuns: () => this.compareRuns(),
 		};
 		return Object.entries(handlers).map(([command, handler]) =>
 			vscode.commands.registerCommand(`agentic.${command}`, async (item?: WorkbenchItem | string) => {
@@ -613,18 +615,21 @@ export class Commands implements vscode.Disposable {
 			choice(run.name, run.id, `${run.status} · ${new Date(run.startedAt).toLocaleString()}`)));
 	}
 
+	private async loadRun(id: string): Promise<PersistedRun | undefined> {
+		try {
+			return JSON.parse(Buffer.from(await vscode.workspace.fs.readFile(this.runDataUri(id))).toString()) as PersistedRun;
+		} catch {
+			return undefined;
+		}
+	}
+
 	/** Clicking a run loads its full output into the Output panel. */
 	private async openRun(id?: string): Promise<void> {
 		id = await this.chooseRun('Run output', id);
 		if (!id) {
 			return;
 		}
-		let saved: PersistedRun | undefined;
-		try {
-			saved = JSON.parse(Buffer.from(await vscode.workspace.fs.readFile(this.runDataUri(id))).toString()) as PersistedRun;
-		} catch {
-			saved = undefined;
-		}
+		const saved = await this.loadRun(id);
 		if (!saved) {
 			await this.openReport(id);
 			return;
@@ -632,6 +637,27 @@ export class Commands implements vscode.Disposable {
 		await this.showPanel('output');
 		await this.output.show();
 		this.output.load(saved);
+	}
+
+	private async compareRuns(): Promise<void> {
+		if (this.state.runs.length < 2) {
+			throw new Error('Run at least two workflows before comparing runs.');
+		}
+		const first = await this.chooseRun('Compare: first run (A)');
+		if (!first) {
+			return;
+		}
+		const second = await this.chooseRun('Compare: second run (B)');
+		if (!second || second === first) {
+			return;
+		}
+		const [a, b] = [await this.loadRun(first), await this.loadRun(second)];
+		if (!a || !b) {
+			throw new Error('Those runs have no saved output to compare.');
+		}
+		const uri = vscode.Uri.joinPath(this.reportUri(first), '..', `compare-${first}-${second}.md`);
+		await vscode.workspace.fs.writeFile(uri, Buffer.from(compareRuns(a, b)));
+		await vscode.window.showTextDocument(uri, { preview: false });
 	}
 
 	/** Opens the full Markdown report (request, workspace edits, every stage) in the editor. */

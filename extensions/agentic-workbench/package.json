@@ -151,6 +151,11 @@
 				"command": "agentic.openReport",
 				"title": "Open Full Run Report",
 				"category": "Agentic"
+			},
+			{
+				"command": "agentic.compareRuns",
+				"title": "Compare Runs",
+				"category": "Agentic"
 			}
 		],
 		"menus": {
@@ -205,6 +210,10 @@
 				},
 				{
 					"command": "agentic.openReport",
+					"when": "view == agentic.workbench && viewItem == run"
+				},
+				{
+					"command": "agentic.compareRuns",
 					"when": "view == agentic.workbench && viewItem == run"
 				}
 			]
