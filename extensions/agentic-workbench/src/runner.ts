@@ -254,6 +254,8 @@ export interface WorkflowHandlers {
 	decide?: (step: WorkflowStep, inputs: StepInput[]) => Promise<{ approved: boolean; reason: string }>;
 	/** Resolves a subworkflow step's referenced workflow. */
 	resolveWorkflow?: (id: string) => Workflow | undefined;
+	/** When set, the run halts just before this step id and reports its resolved inputs. */
+	stopBefore?: string;
 }
 
 export async function runWorkflow(
@@ -276,6 +278,10 @@ export async function runWorkflow(
 	const label = (step: WorkflowStep) => `## Input from ${step.name}${step.outputType && step.outputType !== 'Text' ? ` (${step.outputType})` : ''}`;
 	for (const step of ordered) {
 		const kind = stepKind(step);
+		if (handlers.stopBefore && step.id === handlers.stopBefore) {
+			const resolved = step.inputs.map(id => `## Input from ${steps.get(id)!.name}\n\n${outputs.get(id) ?? '(not produced)'}`);
+			return `# Stopped before ${step.name}\n\n${resolved.length ? resolved.join('\n\n') : 'This step has no inputs.'}\n`;
+		}
 		if (kind === 'input') {
 			outputs.set(step.id, inputValues[step.id] ?? task);
 			continue;

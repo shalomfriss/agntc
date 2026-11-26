@@ -268,6 +268,25 @@ test('a subworkflow step runs a referenced workflow and rejects recursion', asyn
 	await assert.rejects(runWorkflow(loop, 'Go', mocks([], undefined, {}).runner, {}, { resolveWorkflow: () => loop }), /recursively/);
 });
 
+test('stop-before-step runs upstream steps and reports resolved inputs without running the target', async () => {
+	const workflow = {
+		id: 'sb', name: 'SB',
+		steps: [
+			{ id: 'a', name: 'First', kind: 'agent', agentId: 'alpha', inputs: [] },
+			{ id: 'b', name: 'Second', kind: 'agent', agentId: 'beta', inputs: ['a'] },
+		],
+	};
+	const ran = [];
+	const { runner } = mocks([agent('alpha'), agent('beta')], undefined, {
+		alpha: [() => { ran.push('alpha'); return output('first out'); }],
+		beta: [() => { ran.push('beta'); return output('second out'); }],
+	});
+	const result = await runWorkflow(workflow, 'task', runner, {}, { stopBefore: 'b' });
+	assert.deepEqual(ran, ['alpha']);
+	assert.match(result, /Stopped before Second/);
+	assert.match(result, /Input from First\n\nfirst out/);
+});
+
 test('a quality gate fails when an upstream review requests revision', async () => {
 	const workflow = {
 		id: 'gated', name: 'Gated',
