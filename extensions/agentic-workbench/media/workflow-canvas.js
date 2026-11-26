@@ -49,6 +49,59 @@ function highlight(id) {
 	for (const node of nodesLayer.children) {
 		node.classList.toggle('selected', node.dataset.id === id);
 	}
+	renderInspector();
+}
+
+function row(label, value) {
+	const line = document.createElement('div');
+	line.className = 'inspect-row';
+	const key = document.createElement('span');
+	key.className = 'inspect-key';
+	key.textContent = label;
+	const val = document.createElement('span');
+	val.className = 'inspect-value';
+	val.textContent = value;
+	line.append(key, val);
+	return line;
+}
+
+function renderInspector() {
+	const inspector = element('inspector');
+	const steps = snapshot.workflow && snapshot.workflow.steps;
+	const step = steps && steps.find(value => value.id === selectedId);
+	if (!step) {
+		inspector.hidden = true;
+		inspector.replaceChildren();
+		return;
+	}
+	const kindLabel = {
+		agent: 'Agent', input: 'Input', condition: 'Condition', tool: 'Tool', human: 'Human decision', subworkflow: 'Subworkflow',
+	}[step.kind || 'agent'] || 'Agent';
+	const title = document.createElement('div');
+	title.className = 'inspect-title';
+	title.textContent = `${step.name} · ${wording.inspector}`;
+	const body = document.createElement('div');
+	body.append(row(wording.inspectKind, kindLabel));
+	if (step.kind !== 'input' && step.kind !== 'condition' && step.kind !== 'human') {
+		const outputType = (snapshot.artifactTypes || []).find(value => value.id === (step.outputType || 'Text'));
+		body.append(row(wording.inspectProduces, outputType ? outputType.name : (step.outputType || 'Text')));
+		if (outputType && outputType.fields && outputType.fields.length) {
+			body.append(row(wording.inspectContract, outputType.fields.join(', ')));
+		}
+	} else if (step.outputType) {
+		body.append(row(wording.inspectProduces, typeName(step.outputType)));
+	}
+	const sources = (step.inputs || []).map(id => {
+		const source = steps.find(value => value.id === id);
+		if (!source) {
+			return undefined;
+		}
+		const type = source.outputType && source.outputType !== 'Text' ? ` (${typeName(source.outputType)})` : '';
+		return `${source.name}${type}`;
+	}).filter(Boolean);
+	body.append(row(wording.inspectInputs, sources.length ? sources.join(', ') : wording.inspectNone));
+	inspector.replaceChildren(title, body);
+	inspector.hidden = false;
 }
 
 function openNode(step) {
@@ -155,7 +208,10 @@ function renderNode(step) {
 	const node = document.createElement('div');
 	const input = step.kind === 'input';
 	const condition = step.kind === 'condition';
-	node.className = `node ${input ? 'input' : condition ? 'condition' : 'agent'}`;
+	const tool = step.kind === 'tool';
+	const human = step.kind === 'human';
+	const subworkflow = step.kind === 'subworkflow';
+	node.className = `node ${input ? 'input' : condition ? 'condition' : tool ? 'tool' : human ? 'human' : subworkflow ? 'subworkflow' : 'agent'}`;
 	node.dataset.id = step.id;
 	node.style.left = `${step.x ?? 24}px`;
 	node.style.top = `${step.y ?? 24}px`;
@@ -196,6 +252,54 @@ function renderNode(step) {
 		detail.className = 'meta';
 		detail.append(typeBadge('GateResult'));
 		node.append(detail);
+		node.append(makePort('out'));
+	} else if (tool) {
+		const command = document.createElement('input');
+		command.className = 'command-input';
+		command.type = 'text';
+		command.spellcheck = false;
+		command.placeholder = wording.commandPlaceholder;
+		command.value = step.command || '';
+		command.disabled = readOnly;
+		command.addEventListener('pointerdown', event => event.stopPropagation());
+		command.addEventListener('change', () => post({ type: 'setCommand', id: step.id, command: command.value.trim() }));
+		node.append(command);
+		const detail = document.createElement('div');
+		detail.className = 'meta';
+		detail.append(typeBadge('TestReport'));
+		node.append(detail);
+		const hint = document.createElement('p');
+		hint.className = 'node-hint';
+		hint.textContent = wording.toolHint;
+		node.append(hint);
+		node.append(makePort('out'));
+	} else if (human) {
+		const detail = document.createElement('div');
+		detail.className = 'meta';
+		detail.append(typeBadge('ReviewReport'));
+		node.append(detail);
+		const hint = document.createElement('p');
+		hint.className = 'node-hint';
+		hint.textContent = wording.humanHint;
+		node.append(hint);
+		node.append(makePort('out'));
+	} else if (subworkflow) {
+		const select = document.createElement('select');
+		select.className = 'agent-select';
+		const choices = (snapshot.workflows || []).filter(value => value.id !== step.id && value.id !== snapshot.selection && value.id !== 'code-factory');
+		select.append(new Option(wording.chooseWorkflow, ''));
+		for (const value of choices) {
+			select.append(new Option(value.name, value.id));
+		}
+		select.value = step.workflowId || '';
+		select.disabled = readOnly;
+		select.addEventListener('pointerdown', event => event.stopPropagation());
+		select.addEventListener('change', () => { if (select.value) { post({ type: 'setWorkflowRef', id: step.id, workflowId: select.value }); } });
+		node.append(select);
+		const hint = document.createElement('p');
+		hint.className = 'node-hint';
+		hint.textContent = wording.subHint;
+		node.append(hint);
 		node.append(makePort('out'));
 	} else {
 		const agent = step.agentId ? agentsById.get(step.agentId) : undefined;
@@ -261,7 +365,7 @@ function renderNode(step) {
 
 	node.addEventListener('pointerdown', event => beginDrag(event, node, step));
 	node.addEventListener('click', event => {
-		if (event.target.closest('button, select, .port')) {
+		if (event.target.closest('button, select, input, .port')) {
 			return;
 		}
 		if (nodeMoved) {
@@ -353,7 +457,7 @@ function render() {
 	}
 	element('actions').hidden = !workflow;
 	const editable = Boolean(workflow) && !readOnly;
-	for (const id of ['add-input', 'add-agent', 'add-condition', 'rename', 'delete', 'save']) {
+	for (const id of ['add-input', 'add-agent', 'add-condition', 'add-tool', 'add-human', 'add-sub', 'rename', 'delete', 'save']) {
 		element(id).hidden = !editable;
 	}
 	const steps = workflow?.steps ?? [];
@@ -362,6 +466,7 @@ function render() {
 	placeholder.textContent = !workflow ? wording.noWorkflows : wording.emptyWorkflow;
 	element('hint').textContent = readOnly ? wording.readOnlyHint
 		: workflow && steps.length ? wording.linkHint : '';
+	renderInspector();
 	requestAnimationFrame(renderWires);
 }
 
@@ -372,7 +477,7 @@ function pointAt(event) {
 
 function beginDrag(event, node, step) {
 	nodeMoved = false;
-	if (readOnly || event.button !== 0 || event.target.closest('button, select, .port')) {
+	if (readOnly || event.button !== 0 || event.target.closest('button, select, input, .port')) {
 		return;
 	}
 	event.preventDefault();
@@ -467,6 +572,9 @@ element('add-agent').addEventListener('click', () => {
 	post({ type: 'addNode', kind: 'agent', agentId: snapshot.agents[0].id });
 });
 element('add-condition').addEventListener('click', () => post({ type: 'addNode', kind: 'condition' }));
+element('add-tool').addEventListener('click', () => post({ type: 'addNode', kind: 'tool' }));
+element('add-human').addEventListener('click', () => post({ type: 'addNode', kind: 'human' }));
+element('add-sub').addEventListener('click', () => post({ type: 'addNode', kind: 'subworkflow' }));
 element('save').addEventListener('click', () => {
 	if (!snapshot.workflow) {
 		return;

@@ -92,7 +92,9 @@ export class WorkflowCanvasView implements vscode.WebviewViewProvider, vscode.Di
 			workflow,
 			agents: workbench.agents.map(({ id, name, access, subagents, maxSubagents }) =>
 				({ id, name, access, subagents, maxSubagents })),
-			artifactTypes: Object.values(artifactTypes).map(({ id, name }) => ({ id, name })),
+			artifactTypes: Object.values(artifactTypes).map(type => ({
+				id: type.id, name: type.name, fields: type.schema ? Object.keys(type.schema.properties ?? {}) : [],
+			})),
 		});
 	}
 
@@ -199,17 +201,25 @@ export class WorkflowCanvasView implements vscode.WebviewViewProvider, vscode.Di
 					break;
 				case 'addNode':
 					if (this.selection) {
-						const kind = data.kind === 'input' || data.kind === 'condition' ? data.kind : 'agent';
+						const kinds = ['input', 'condition', 'tool', 'human', 'subworkflow'];
+						const kind = typeof data.kind === 'string' && kinds.includes(data.kind) ? data.kind as WorkflowStep['kind'] : 'agent';
 						const agentId = typeof data.agentId === 'string' ? data.agentId : undefined;
+						const names: Record<string, string> = {
+							input: vscode.l10n.t("User input"), condition: vscode.l10n.t("Quality gate"),
+							tool: vscode.l10n.t("Run tests"), human: vscode.l10n.t("Human review"),
+							subworkflow: vscode.l10n.t("Subworkflow"),
+						};
+						const outputTypes: Record<string, string | undefined> = { condition: 'GateResult', tool: 'TestReport', human: 'ReviewReport' };
 						await this.mutate(this.selection, workflow => {
 							const index = workflow.steps.length;
-							const defaultName = kind === 'input' ? vscode.l10n.t("User input")
-								: kind === 'condition' ? vscode.l10n.t("Quality gate") : vscode.l10n.t("Step {0}", index + 1);
 							const step: WorkflowStep = {
 								id: randomUUID(),
-								name: typeof data.name === 'string' && data.name.trim() ? data.name.trim() : defaultName,
+								name: typeof data.name === 'string' && data.name.trim() ? data.name.trim()
+									: names[kind!] ?? vscode.l10n.t("Step {0}", index + 1),
 								kind, agentId: kind === 'agent' ? agentId : undefined, inputs: [],
-								outputType: kind === 'condition' ? 'GateResult' : undefined,
+								outputType: outputTypes[kind!],
+								command: kind === 'tool' ? '' : undefined,
+								workflowId: kind === 'subworkflow' && typeof data.workflowId === 'string' ? data.workflowId : undefined,
 								x: 24, y: 24 + index * 128,
 							};
 							if (kind === 'agent' && !agentId) {
@@ -224,6 +234,23 @@ export class WorkflowCanvasView implements vscode.WebviewViewProvider, vscode.Di
 						await this.mutate(this.selection, workflow => {
 							const step = this.step(workflow, data.id);
 							step.outputType = data.outputType === 'Text' ? undefined : data.outputType as string;
+						});
+					}
+					break;
+				case 'setCommand':
+					if (this.selection && typeof data.command === 'string') {
+						await this.mutate(this.selection, workflow => {
+							this.step(workflow, data.id).command = data.command as string;
+						});
+					}
+					break;
+				case 'setWorkflowRef':
+					if (this.selection && typeof data.workflowId === 'string') {
+						if (data.workflowId === this.selection) {
+							throw new Error(vscode.l10n.t("A workflow cannot call itself."));
+						}
+						await this.mutate(this.selection, workflow => {
+							this.step(workflow, data.id).workflowId = data.workflowId as string;
 						});
 					}
 					break;
@@ -342,10 +369,24 @@ export class WorkflowCanvasView implements vscode.WebviewViewProvider, vscode.Di
 			addInput: vscode.l10n.t("Add Input"),
 			addAgent: vscode.l10n.t("Add Agent"),
 			addCondition: vscode.l10n.t("Add Gate"),
+			addTool: vscode.l10n.t("Add Tool"),
+			addHuman: vscode.l10n.t("Add Review"),
+			addSub: vscode.l10n.t("Add Subworkflow"),
 			save: vscode.l10n.t("Save"),
 			run: vscode.l10n.t("Run"),
 			outputType: vscode.l10n.t("Produces"),
 			condition: vscode.l10n.t("Quality gate · waits for all inputs to pass"),
+			toolHint: vscode.l10n.t("Runs this shell command in the workspace and reports pass/fail."),
+			commandPlaceholder: vscode.l10n.t("e.g. swift test"),
+			humanHint: vscode.l10n.t("Pauses the run for you to accept or request revision."),
+			chooseWorkflow: vscode.l10n.t("Choose a workflow…"),
+			subHint: vscode.l10n.t("Runs another workflow as a step."),
+			inspector: vscode.l10n.t("Inspector"),
+			inspectKind: vscode.l10n.t("Type"),
+			inspectProduces: vscode.l10n.t("Produces"),
+			inspectInputs: vscode.l10n.t("Inputs"),
+			inspectNone: vscode.l10n.t("No inputs connected."),
+			inspectContract: vscode.l10n.t("Contract fields"),
 			rename: vscode.l10n.t("Rename"),
 			remove: vscode.l10n.t("Remove"),
 			delete: vscode.l10n.t("Delete"),
@@ -391,6 +432,9 @@ export class WorkflowCanvasView implements vscode.WebviewViewProvider, vscode.Di
 				<button type="button" id="add-input" class="secondary">${escapeHtml(wording.addInput)}</button>
 				<button type="button" id="add-agent" class="secondary">${escapeHtml(wording.addAgent)}</button>
 				<button type="button" id="add-condition" class="secondary">${escapeHtml(wording.addCondition)}</button>
+				<button type="button" id="add-tool" class="secondary">${escapeHtml(wording.addTool)}</button>
+				<button type="button" id="add-human" class="secondary">${escapeHtml(wording.addHuman)}</button>
+				<button type="button" id="add-sub" class="secondary">${escapeHtml(wording.addSub)}</button>
 				<button type="button" id="rename" class="secondary">${escapeHtml(wording.rename)}</button>
 				<button type="button" id="delete" class="text-button delete">${escapeHtml(wording.delete)}</button>
 				<button type="button" id="save" class="secondary">${escapeHtml(wording.save)}</button>
@@ -404,6 +448,7 @@ export class WorkflowCanvasView implements vscode.WebviewViewProvider, vscode.Di
 			<p id="placeholder" class="placeholder"></p>
 		</div>
 		<p id="hint" class="hint"></p>
+		<aside id="inspector" hidden></aside>
 	</div>
 </body>
 </html>`;
